@@ -425,7 +425,7 @@ def query_rag(request: QueryRequest):
 if __name__ == "__main__":
     import uvicorn
     # Dynamic port and host for cloud deployment
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 7860))
     host = os.environ.get("HOST", "127.0.0.1")
     reload = os.environ.get("ENV", "development") == "development"
     uvicorn.run("main:app", host=host, port=port, reload=reload)
