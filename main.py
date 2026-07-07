@@ -88,10 +88,9 @@ prompt = ChatPromptTemplate.from_messages(
             "system",
             """You are a helpful AI assistant.
 
-Use ONLY the provided context to answer the question.
+Use the provided context to answer the question as completely as possible. 
 
-If the answer is not present in the context,
-say: "I could not find the answer in the document."
+If any part of the question cannot be answered using the provided context, answer the parts that are present, and politely state which details were missing from the documents.
 """
         ),
         (
