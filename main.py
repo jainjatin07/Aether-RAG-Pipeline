@@ -335,6 +335,34 @@ def reset_database():
     gc.collect()
     return {"message": "Workspace documents and vector store reset completed."}
 
+# Helper: Split complex multi-part queries into simple search queries
+def generate_sub_queries(query: str) -> List[str]:
+    prompt_text = f"""Deconstruct the following user query into 1 to 3 simple search queries for a vector database.
+Each sub-query must focus on a single concept, topic, question, or term.
+Return ONLY a valid JSON list of strings. Do not include markdown code block syntax (like ```json), explanations, or notes.
+
+User Query: "{query}"
+
+Output:"""
+    try:
+        response = llm.invoke(prompt_text)
+        text = response.content.strip()
+        # Strip potential markdown wrapping
+        if text.startswith("```"):
+            lines = text.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        
+        queries = json.loads(text)
+        if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
+            return queries
+    except Exception as e:
+        print(f"Error generating sub-queries: {e}")
+    return [query]
+
 # Request schema for querying
 class QueryRequest(BaseModel):
     query: str
@@ -346,20 +374,25 @@ def query_rag(request: QueryRequest):
     query = request.query
     mode = request.mode
     
+    # Deconstruct query into sub-queries for multi-document retrieval
+    sub_queries = generate_sub_queries(query)
+    if query not in sub_queries:
+        sub_queries.append(query)
+        
     retrieved_docs = []
     
     # Initialize DBs on demand
     default_db = get_chroma_vectorstore("langchain")
     user_db = get_chroma_vectorstore("user_uploads")
     
-    # Set up retrievers
+    # Set up retrievers (lower k per query since we run multiple sub-queries)
     default_retriever = default_db.as_retriever(
         search_type="mmr",
-        search_kwargs={"k": 5, "fetch_k": 15, "lambda_mult": 0.5}
+        search_kwargs={"k": 3, "fetch_k": 8, "lambda_mult": 0.5}
     )
     user_retriever = user_db.as_retriever(
         search_type="mmr",
-        search_kwargs={"k": 8, "fetch_k": 20, "lambda_mult": 0.5}
+        search_kwargs={"k": 4, "fetch_k": 10, "lambda_mult": 0.5}
     )
     
     # Check collections counts
@@ -373,35 +406,33 @@ def query_rag(request: QueryRequest):
     except Exception:
         user_count = 0
         
-    if mode == "default":
-        if default_count == 0:
-            del default_db, user_db, default_retriever, user_retriever
-            gc.collect()
-            raise HTTPException(status_code=400, detail="Default book database is empty or not created.")
-        retrieved_docs = default_retriever.invoke(query)
-        
-    elif mode == "user":
-        if user_count == 0:
-            del default_db, user_db, default_retriever, user_retriever
-            gc.collect()
-            return {"response": "I could not find any uploaded documents in your workspace. Please upload some files (PDF, DOCX, TXT) in the left sidebar first!"}
-        retrieved_docs = user_retriever.invoke(query)
-        
-    elif mode == "combined":
-        # Pull from both
-        if default_count > 0:
-            retrieved_docs.extend(default_retriever.invoke(query))
-        if user_count > 0:
-            retrieved_docs.extend(user_retriever.invoke(query))
-            
-        if not retrieved_docs:
-            del default_db, user_db, default_retriever, user_retriever
-            gc.collect()
-            return {"response": "No documents available to retrieve from. Please upload files or configure the default database."}
-    else:
+    # Query database for each sub-query and pool unique chunks
+    seen_contents = set()
+    
+    for sq in sub_queries:
+        if mode == "default" or mode == "combined":
+            if default_count > 0:
+                for doc in default_retriever.invoke(sq):
+                    if doc.page_content not in seen_contents:
+                        seen_contents.add(doc.page_content)
+                        retrieved_docs.append(doc)
+                        
+        if mode == "user" or mode == "combined":
+            if user_count > 0:
+                for doc in user_retriever.invoke(sq):
+                    if doc.page_content not in seen_contents:
+                        seen_contents.add(doc.page_content)
+                        retrieved_docs.append(doc)
+                        
+    # Check if we have anything
+    if not retrieved_docs:
         del default_db, user_db, default_retriever, user_retriever
         gc.collect()
-        raise HTTPException(status_code=400, detail="Invalid corpus search mode.")
+        if mode == "default" and default_count == 0:
+            raise HTTPException(status_code=400, detail="Default book database is empty or not created.")
+        elif mode == "user" and user_count == 0:
+            return {"response": "I could not find any uploaded documents in your workspace. Please upload some files (PDF, DOCX, TXT) in the left sidebar first!"}
+        return {"response": "No relevant documents could be found for your query. Please refine your question or add more documents."}
         
     # Compile context
     context = "\n\n".join([doc.page_content for doc in retrieved_docs])
