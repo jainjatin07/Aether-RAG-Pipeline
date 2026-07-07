@@ -965,6 +965,143 @@
             0% { opacity: 0.5; transform: scale(0.995); }
             100% { opacity: 1; transform: scale(1); }
         }
+
+        /* Mobile Sidebar Toggle Buttons */
+        .sidebar-toggle-btn {
+            display: none; /* Hidden on desktop */
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 8px;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s;
+        }
+        .sidebar-toggle-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .sidebar-close-btn {
+            display: none; /* Hidden on desktop */
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 6px;
+            margin-left: auto;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.3s, background 0.3s;
+        }
+        .sidebar-close-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        #sidebar-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 12;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        #sidebar-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* Media Queries for Responsiveness */
+        @media (max-width: 768px) {
+            #app-container {
+                grid-template-columns: 1fr !important; /* Single column layout on mobile */
+            }
+
+            aside.sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 290px;
+                height: 100%;
+                transform: translateX(-100%);
+                transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+                z-index: 1000;
+                box-shadow: 20px 0 40px rgba(0, 0, 0, 0.6);
+                background: rgba(10, 10, 12, 0.95) !important; /* More opaque for mobile drawer overlay */
+            }
+
+            aside.sidebar.open {
+                transform: translateX(0);
+            }
+
+            .sidebar-toggle-btn {
+                display: flex;
+            }
+
+            .sidebar-close-btn {
+                display: flex;
+            }
+
+            /* Make chat panels fit nicely */
+            .chat-panel {
+                width: 100%;
+            }
+
+            .chat-header {
+                padding: 12px 16px !important;
+            }
+
+            .chat-viewport {
+                padding: 16px 16px 0 16px !important;
+            }
+
+            .chat-input-area {
+                padding: 12px 16px 20px 16px !important;
+            }
+
+            .welcome-title {
+                font-size: 1.8rem !important;
+            }
+
+            .message-bubble {
+                max-width: 90% !important;
+                padding: 12px 16px !important;
+                font-size: 0.9rem !important;
+            }
+
+            .brand-section {
+                margin-bottom: 30px;
+            }
+        }
+
+        /* Extra scaling adjustments for very small screens (phones) */
+        @media (max-width: 480px) {
+            .connection-status {
+                display: none !important; /* Hide secondary branding on tiny screens */
+            }
+
+            .welcome-subtitle {
+                font-size: 0.8rem !important;
+            }
+            
+            .input-bar {
+                padding: 4px 6px 4px 14px !important;
+                border-radius: 20px !important;
+            }
+
+            .chat-textbox {
+                font-size: 0.88rem !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -992,6 +1129,9 @@
     <!-- Main Workspace Application -->
     <div id="app-container">
         
+        <!-- Sidebar Overlay Mask for Mobile -->
+        <div id="sidebar-overlay" onclick="toggleMobileSidebar()"></div>
+        
         <!-- Sidebar Navigation Panel -->
         <aside class="sidebar">
             
@@ -1000,6 +1140,9 @@
                 <div class="brand-logo-glow"></div>
                 <h1 class="brand-name">AetherRAG</h1>
                 <span class="brand-badge">PRO</span>
+                <button class="sidebar-close-btn" onclick="toggleMobileSidebar()" title="Close Sidebar">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
             </div>
 
             <!-- Knowledge Source Selection -->
@@ -1071,6 +1214,9 @@
             
             <!-- Chat Title/Status Bar -->
             <header class="chat-header">
+                <button class="sidebar-toggle-btn" onclick="toggleMobileSidebar()" title="Toggle Sidebar">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                </button>
                 <div class="current-mode-display">
                     <span class="mode-indicator-dot" id="mode-dot"></span>
                     <span id="current-mode-text">Corpus Mode: Default Book</span>
@@ -1339,6 +1485,16 @@
 
         document.getElementById('skip-intro-btn').addEventListener('click', exitIntro);
 
+        // Toggle Sidebar Drawer on Mobile
+        function toggleMobileSidebar() {
+            const sidebar = document.querySelector('aside.sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            if (sidebar && overlay) {
+                sidebar.classList.toggle('open');
+                overlay.classList.toggle('active');
+            }
+        }
+
         // Core App Variables
         let selectedSource = 'default'; // 'default', 'user'
         const uploadedDocs = [];
@@ -1366,6 +1522,12 @@
             } else if (source === 'user') {
                 dot.classList.add('user');
                 text.innerText = 'Corpus Mode: Uploaded Documents Only';
+            }
+
+            // Close mobile sidebar if open
+            const sidebar = document.querySelector('aside.sidebar');
+            if (sidebar && sidebar.classList.contains('open')) {
+                toggleMobileSidebar();
             }
         }
 
