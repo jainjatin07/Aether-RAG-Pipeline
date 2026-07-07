@@ -3,7 +3,7 @@ import re
 import json
 import shutil
 from typing import List
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -142,18 +142,34 @@ def load_uploaded_file(file_path: str, filename: str) -> List[Document]:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to read text file: {str(e)}")
 
-# Helper: Load active list of files from metadata file
-def get_uploaded_filenames() -> List[str]:
+# Helper: Load metadata dictionary
+def get_metadata() -> dict:
     try:
         with open(METADATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            if isinstance(data, list):
+                # Migrated old list format to dict format
+                return {filename: "ready" for filename in data}
+            return data
     except Exception:
-        return []
+        return {}
 
-# Helper: Save active list of files to metadata file
-def save_uploaded_filenames(filenames: List[str]):
+# Helper: Save metadata dictionary
+def save_metadata(metadata: dict):
     with open(METADATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(filenames, f, indent=4)
+        json.dump(metadata, f, indent=4)
+
+# Helper: Load active list of successfully indexed files
+def get_uploaded_filenames() -> List[str]:
+    metadata = get_metadata()
+    return [filename for filename, status in metadata.items() if status == "ready"]
+
+# Helper: Save active list of files (backward compatibility)
+def save_uploaded_filenames(filenames: List[str]):
+    metadata = get_metadata()
+    # Keep only the ones in filenames, set to "ready"
+    updated_metadata = {fname: metadata.get(fname, "ready") for fname in filenames}
+    save_metadata(updated_metadata)
 
 # Helper: Rebuild user Chroma collection from disk files
 def rebuild_user_collection(remaining_files: List[str]):
@@ -182,9 +198,41 @@ def get_dashboard():
     with open(index_path, "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
+# Helper: Background task to parse and index document
+def index_document_task(file_path: str, filename: str):
+    try:
+        docs = load_uploaded_file(file_path, filename)
+        if not docs:
+            raise ValueError("Uploaded file is empty.")
+        
+        # Split documents
+        chunks = splitter.split_documents(docs)
+        
+        # Add to Chroma
+        user_vectorstore.add_documents(chunks)
+        
+        # Update metadata to mark as ready
+        metadata = get_metadata()
+        metadata[filename] = "ready"
+        save_metadata(metadata)
+        print(f"Successfully indexed {filename} in background.")
+    except Exception as e:
+        print(f"Error indexing {filename} in background: {e}")
+        # Remove from metadata on failure
+        metadata = get_metadata()
+        if filename in metadata:
+            del metadata[filename]
+            save_metadata(metadata)
+        # Cleanup file from disk
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+
 # API: Upload file
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     filename = secure_filename(file.filename)
     if not filename:
         raise HTTPException(status_code=400, detail="Invalid filename.")
@@ -198,35 +246,21 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
-    # Parse and index file
-    try:
-        docs = load_uploaded_file(file_path, filename)
-        if not docs:
-            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-        
-        # Split documents
-        chunks = splitter.split_documents(docs)
-        
-        # Add to Chroma
-        user_vectorstore.add_documents(chunks)
-        
-        # Update metadata list
-        files = get_uploaded_filenames()
-        if filename not in files:
-            files.append(filename)
-            save_uploaded_filenames(files)
-            
-        return {"filename": filename, "chunks": len(chunks)}
-    except Exception as e:
-        # Cleanup file if indexing fails
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        raise HTTPException(status_code=500, detail=f"Failed to parse and index document: {str(e)}")
+    # Add to metadata with "indexing" status
+    metadata = get_metadata()
+    metadata[filename] = "indexing"
+    save_metadata(metadata)
+    
+    # Queue background task for parsing and embedding
+    background_tasks.add_task(index_document_task, file_path, filename)
+    
+    return {"filename": filename, "status": "indexing"}
 
 # API: List uploaded files
 @app.get("/api/documents")
 def list_documents():
-    return get_uploaded_filenames()
+    metadata = get_metadata()
+    return [{"filename": k, "status": v} for k, v in metadata.items()]
 
 # API: Delete single document
 @app.delete("/api/documents/{filename}")
@@ -234,8 +268,8 @@ def delete_document(filename: str):
     filename = secure_filename(filename)
     file_path = os.path.join(UPLOADS_DIR, filename)
     
-    files = get_uploaded_filenames()
-    if filename not in files:
+    metadata = get_metadata()
+    if filename not in metadata:
         raise HTTPException(status_code=404, detail="Document not found.")
     
     # Remove file from disk
@@ -246,15 +280,15 @@ def delete_document(filename: str):
             raise HTTPException(status_code=500, detail=f"Failed to remove file from disk: {str(e)}")
             
     # Remove file reference from metadata
-    files.remove(filename)
-    save_uploaded_filenames(files)
+    del metadata[filename]
+    save_metadata(metadata)
     
     # Try deleting from collection using metadata filter
     try:
         user_vectorstore.delete(where={"source": filename})
     except Exception:
         # Fallback: recreate the collection if delete filter fails
-        rebuild_user_collection(files)
+        rebuild_user_collection(get_uploaded_filenames())
         
     return {"message": f"Successfully deleted {filename}"}
 
@@ -262,7 +296,8 @@ def delete_document(filename: str):
 @app.post("/api/reset")
 def reset_database():
     global user_vectorstore
-    files = get_uploaded_filenames()
+    metadata = get_metadata()
+    files = list(metadata.keys())
     
     # Delete uploaded files from disk
     for fname in files:
@@ -274,7 +309,7 @@ def reset_database():
                 pass
                 
     # Clear metadata
-    save_uploaded_filenames([])
+    save_metadata({})
     
     # Clear collection
     try:
