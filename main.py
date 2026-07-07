@@ -2,6 +2,7 @@ import os
 import re
 import json
 import shutil
+import gc
 from typing import List
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -66,19 +67,13 @@ if not os.path.exists(CHROMA_DIR) or not os.listdir(CHROMA_DIR):
 embedding_model = MistralAIEmbeddings(model="mistral-embed")
 llm = ChatMistralAI(model="mistral-small-2506")
 
-# Vectorstores initialization
-# Collection name "langchain" is the default for create_database.py
-default_vectorstore = Chroma(
-    persist_directory=CHROMA_DIR,
-    embedding_function=embedding_model,
-    collection_name="langchain"
-)
-
-user_vectorstore = Chroma(
-    persist_directory=CHROMA_DIR,
-    embedding_function=embedding_model,
-    collection_name="user_uploads"
-)
+# Helper: Get on-demand Chroma client to minimize RAM footprint
+def get_chroma_vectorstore(collection_name: str) -> Chroma:
+    return Chroma(
+        persist_directory=CHROMA_DIR,
+        embedding_function=embedding_model,
+        collection_name=collection_name
+    )
 
 # Text Splitter for uploads
 splitter = RecursiveCharacterTextSplitter(
@@ -174,10 +169,14 @@ def save_uploaded_filenames(filenames: List[str]):
 # Helper: Rebuild user Chroma collection from disk files
 def rebuild_user_collection(remaining_files: List[str]):
     try:
-        user_vectorstore.delete_collection()
+        db = get_chroma_vectorstore("user_uploads")
+        db.delete_collection()
+        del db
+        gc.collect()
     except Exception:
         pass
     
+    db = get_chroma_vectorstore("user_uploads")
     for fname in remaining_files:
         fpath = os.path.join(UPLOADS_DIR, fname)
         if os.path.exists(fpath):
@@ -185,9 +184,14 @@ def rebuild_user_collection(remaining_files: List[str]):
                 docs = load_uploaded_file(fpath, fname)
                 if docs:
                     chunks = splitter.split_documents(docs)
-                    user_vectorstore.add_documents(chunks)
+                    db.add_documents(chunks)
+                    del chunks
+                    del docs
+                    gc.collect()
             except Exception as e:
                 print(f"Error indexing {fname}: {e}")
+    del db
+    gc.collect()
 
 # API: Serve SPA root
 @app.get("/", response_class=HTMLResponse)
@@ -209,7 +213,14 @@ def index_document_task(file_path: str, filename: str):
         chunks = splitter.split_documents(docs)
         
         # Add to Chroma
-        user_vectorstore.add_documents(chunks)
+        db = get_chroma_vectorstore("user_uploads")
+        db.add_documents(chunks)
+        
+        # Clean up database client instance and garbage collect immediately
+        del db
+        del chunks
+        del docs
+        gc.collect()
         
         # Update metadata to mark as ready
         metadata = get_metadata()
@@ -229,6 +240,7 @@ def index_document_task(file_path: str, filename: str):
                 os.remove(file_path)
             except Exception:
                 pass
+        gc.collect()
 
 # API: Upload file
 @app.post("/api/upload")
@@ -285,17 +297,19 @@ def delete_document(filename: str):
     
     # Try deleting from collection using metadata filter
     try:
-        user_vectorstore.delete(where={"source": filename})
+        db = get_chroma_vectorstore("user_uploads")
+        db.delete(where={"source": filename})
+        del db
     except Exception:
         # Fallback: recreate the collection if delete filter fails
         rebuild_user_collection(get_uploaded_filenames())
         
+    gc.collect()
     return {"message": f"Successfully deleted {filename}"}
 
 # API: Clear all uploaded documents
 @app.post("/api/reset")
 def reset_database():
-    global user_vectorstore
     metadata = get_metadata()
     files = list(metadata.keys())
     
@@ -313,15 +327,13 @@ def reset_database():
     
     # Clear collection
     try:
-        user_vectorstore.delete_collection()
+        db = get_chroma_vectorstore("user_uploads")
+        db.delete_collection()
+        del db
     except Exception as e:
-        # Reinitialize Chroma object if deletion of collection requires resetting
-        user_vectorstore = Chroma(
-            persist_directory=CHROMA_DIR,
-            embedding_function=embedding_model,
-            collection_name="user_uploads"
-        )
+        pass
         
+    gc.collect()
     return {"message": "Workspace documents and vector store reset completed."}
 
 # Request schema for querying
@@ -337,34 +349,42 @@ def query_rag(request: QueryRequest):
     
     retrieved_docs = []
     
+    # Initialize DBs on demand
+    default_db = get_chroma_vectorstore("langchain")
+    user_db = get_chroma_vectorstore("user_uploads")
+    
     # Set up retrievers
-    default_retriever = default_vectorstore.as_retriever(
+    default_retriever = default_db.as_retriever(
         search_type="mmr",
         search_kwargs={"k": 4, "fetch_k": 10, "lambda_mult": 0.5}
     )
-    user_retriever = user_vectorstore.as_retriever(
+    user_retriever = user_db.as_retriever(
         search_type="mmr",
         search_kwargs={"k": 4, "fetch_k": 10, "lambda_mult": 0.5}
     )
     
     # Check collections counts
     try:
-        default_count = default_vectorstore._collection.count()
+        default_count = default_db._collection.count()
     except Exception:
         default_count = 0
         
     try:
-        user_count = user_vectorstore._collection.count()
+        user_count = user_db._collection.count()
     except Exception:
         user_count = 0
         
     if mode == "default":
         if default_count == 0:
+            del default_db, user_db, default_retriever, user_retriever
+            gc.collect()
             raise HTTPException(status_code=400, detail="Default book database is empty or not created.")
         retrieved_docs = default_retriever.invoke(query)
         
     elif mode == "user":
         if user_count == 0:
+            del default_db, user_db, default_retriever, user_retriever
+            gc.collect()
             return {"response": "I could not find any uploaded documents in your workspace. Please upload some files (PDF, DOCX, TXT) in the left sidebar first!"}
         retrieved_docs = user_retriever.invoke(query)
         
@@ -376,12 +396,20 @@ def query_rag(request: QueryRequest):
             retrieved_docs.extend(user_retriever.invoke(query))
             
         if not retrieved_docs:
+            del default_db, user_db, default_retriever, user_retriever
+            gc.collect()
             return {"response": "No documents available to retrieve from. Please upload files or configure the default database."}
     else:
+        del default_db, user_db, default_retriever, user_retriever
+        gc.collect()
         raise HTTPException(status_code=400, detail="Invalid corpus search mode.")
         
     # Compile context
     context = "\n\n".join([doc.page_content for doc in retrieved_docs])
+    
+    # Clean up DB client instances immediately after retrieval is done (before LLM call)
+    del default_db, user_db, default_retriever, user_retriever
+    gc.collect()
     
     # Run through Mistral AI LLM
     try:
