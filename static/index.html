@@ -1150,7 +1150,7 @@
             <div class="source-selector">
                 
                 <!-- Default DB Card -->
-                <div class="source-card active" id="source-default" onclick="selectSource('default')">
+                <div class="source-card" id="source-default" onclick="selectSource('default')">
                     <div class="source-icon">
                         <!-- Book Icon -->
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
@@ -1162,7 +1162,7 @@
                 </div>
 
                 <!-- Custom User DB Card -->
-                <div class="source-card" id="source-user" onclick="selectSource('user')">
+                <div class="source-card active" id="source-user" onclick="selectSource('user')">
                     <div class="source-icon">
                         <!-- Folder Icon -->
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
@@ -1218,8 +1218,8 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
                 </button>
                 <div class="current-mode-display">
-                    <span class="mode-indicator-dot" id="mode-dot"></span>
-                    <span id="current-mode-text">Corpus Mode: Default Book</span>
+                    <span class="mode-indicator-dot user" id="mode-dot"></span>
+                    <span id="current-mode-text">Corpus Mode: Uploaded Documents Only</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 20px;">
                     <!-- Clear Conversation Button -->
@@ -1496,7 +1496,7 @@
         }
 
         // Core App Variables
-        let selectedSource = 'default'; // 'default', 'user'
+        let selectedSource = 'user'; // 'default', 'user'
         const uploadedDocs = [];
 
         // Selecting Source handler
