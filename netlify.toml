@@ -11,6 +11,6 @@
 [[redirects]]
   # This routes all API calls transparently to your Render backend to avoid CORS issues
   from = "/api/*"
-  to = "https://your-aether-rag-backend.onrender.com/api/:splat"
+  to = "https://aether-rag-pipeline.onrender.com/api/:splat"
   status = 200
   force = true

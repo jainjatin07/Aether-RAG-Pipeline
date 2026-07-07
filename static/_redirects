@@ -4,4 +4,4 @@
 # INSTRUCTION: Replace the URL below with your actual Render Web Service URL
 # (e.g. https://your-aether-rag-backend.onrender.com/api/:splat)
 
-/api/*  https://your-aether-rag-backend.onrender.com/api/:splat  200
+/api/*  https://aether-rag-pipeline.onrender.com/api/:splat  200
