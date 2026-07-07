@@ -1,3 +1,12 @@
+---
+title: Aether RAG
+emoji: 🌌
+colorFrom: purple
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
 # AetherRAG - Obsidian Knowledge Platform
 
 An elegant, glassmorphic Retrieval-Augmented Generation (RAG) dashboard that allows semantic querying of document corpora. Built with **FastAPI**, **ChromaDB**, and **Mistral AI**.
