@@ -1,0 +1,16 @@
+# Netlify Configuration File
+# This tells Netlify how to deploy your frontend static assets and proxy API calls.
+
+[build]
+  # The directory containing the static files (index.html, etc.) to publish
+  publish = "static"
+  
+  # No build command is required since the frontend is pure HTML, CSS, and JS
+  command = ""
+
+[[redirects]]
+  # This routes all API calls transparently to your Render backend to avoid CORS issues
+  from = "/api/*"
+  to = "https://your-aether-rag-backend.onrender.com/api/:splat"
+  status = 200
+  force = true

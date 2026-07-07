@@ -1,0 +1,27 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Environment Variables (Saves API Keys from leakages)
+.env
+
+# Python caching
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local uploads and data
+uploads/*
+!uploads/.gitkeep
+chroma_db/
+
+# IDE Settings
+.vscode/
+.idea/
+.project
+.pydevproject
+
+# System files
+Thumbs.db
+.DS_Store

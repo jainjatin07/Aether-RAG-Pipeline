@@ -1,0 +1,25 @@
+# Core LangChain
+langchain
+langchain-core
+langchain-community
+langchain-text-splitters
+
+# Mistral AI Integration
+mistralai
+langchain-mistralai
+
+# Vector Database
+chromadb
+
+# Document Loaders (for PDF and DOCX uploads)
+pypdf
+python-docx
+
+# Environment Variables
+python-dotenv
+
+# API Server Framework
+fastapi
+uvicorn
+pydantic
+python-multipart
