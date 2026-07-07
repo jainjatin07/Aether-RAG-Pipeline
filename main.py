@@ -356,11 +356,11 @@ def query_rag(request: QueryRequest):
     # Set up retrievers
     default_retriever = default_db.as_retriever(
         search_type="mmr",
-        search_kwargs={"k": 4, "fetch_k": 10, "lambda_mult": 0.5}
+        search_kwargs={"k": 5, "fetch_k": 15, "lambda_mult": 0.5}
     )
     user_retriever = user_db.as_retriever(
         search_type="mmr",
-        search_kwargs={"k": 4, "fetch_k": 10, "lambda_mult": 0.5}
+        search_kwargs={"k": 8, "fetch_k": 20, "lambda_mult": 0.5}
     )
     
     # Check collections counts
