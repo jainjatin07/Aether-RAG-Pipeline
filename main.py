@@ -90,18 +90,7 @@ prompt = ChatPromptTemplate.from_messages(
 
 Use the provided context to answer the question as completely as possible. 
 
-You MUST format your output exactly as follows:
-Answer:
-<your detailed answer here>
-
-Sources Used:
-[1] <source_filename>, Page <page_number>
-     <brief 1-sentence description/phrase of the key information retrieved from this source that supports the answer>
-
-[2] <source_filename>, Page <page_number>
-     <brief 1-sentence description/phrase of the key information retrieved from this source that supports the answer>
-
-Note: Ensure the source filename is the exact filename (including extension, e.g., 001_Harvard_Classics.pdf) from the context. If no page number is present in the source metadata, omit the page number (e.g. [1] document.txt). Only list sources that were actually useful and used to answer the query.
+If any part of the question cannot be answered using the provided context, answer the parts that are present, and politely state which details were missing from the documents.
 """
         ),
         (
@@ -456,7 +445,7 @@ def query_rag(request: QueryRequest):
     for doc in retrieved_docs:
         raw_source = doc.metadata.get("source", "Unknown Source")
         filename = os.path.basename(raw_source)
-        source_name = filename if filename else "Unknown Source"
+        source_name = doc.metadata.get("title") or os.path.splitext(filename)[0]
         
         page_val = doc.metadata.get("page")
         if page_val is not None:
@@ -492,26 +481,18 @@ def query_rag(request: QueryRequest):
         })
         response = llm.invoke(final_prompt)
         
-        # Check LLM output and ensure correct formatting
+        # Append citations to response
         response_content = response.content.strip()
-        
-        # Ensure it has the "Answer:" prefix
-        if not response_content.startswith("Answer:"):
-            if "Answer:" not in response_content:
-                response_content = f"Answer:\n{response_content}"
-                
-        # If the LLM forgot to output "Sources Used:", append a structured fallback list
-        if "Sources Used:" not in response_content and citations:
-            fallback_lines = ["\n\nSources Used:"]
-            for idx, cit in enumerate(citations, 1):
+        if citations:
+            citation_blocks = []
+            for cit in citations:
                 source_name = cit["source"]
                 page_num = cit["page"]
+                cit_str = f"Source:\n{source_name}"
                 if page_num is not None:
-                    fallback_lines.append(f"[{idx}] {source_name}, Page {page_num}")
-                else:
-                    fallback_lines.append(f"[{idx}] {source_name}")
-                fallback_lines.append("     Snippet retrieved from this source.")
-            response_content += "\n".join(fallback_lines)
+                    cit_str += f"\nPage {page_num}"
+                citation_blocks.append(cit_str)
+            response_content += "\n\n" + "\n\n".join(citation_blocks)
             
         return {"response": response_content}
     except Exception as e:
