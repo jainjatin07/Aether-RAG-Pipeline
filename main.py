@@ -323,12 +323,20 @@ def delete_document(filename: str):
     del metadata[filename]
     save_metadata(metadata)
     
-    # Try deleting from collection using metadata filter
+    # Try deleting from collection using metadata filter matching multiple formats
     try:
+        possible_sources = [
+            filename,
+            f"uploads/{filename}",
+            f"uploads\\{filename}",
+            os.path.join(UPLOADS_DIR, filename),
+            os.path.abspath(os.path.join(UPLOADS_DIR, filename))
+        ]
         db = get_chroma_vectorstore("user_uploads")
-        db.delete(where={"source": filename})
+        db.delete(where={"source": {"$in": possible_sources}})
         del db
-    except Exception:
+    except Exception as e:
+        print(f"Direct delete failed: {e}. Rebuilding collection...")
         # Fallback: recreate the collection if delete filter fails
         rebuild_user_collection(get_uploaded_filenames())
         
