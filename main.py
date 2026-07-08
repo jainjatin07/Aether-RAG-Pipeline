@@ -96,6 +96,8 @@ return it exactly as written.
 
 Do not claim the information is missing if the quoted text is present.
 
+Use only the provided context and include direct supporting citations for each major point.
+
 If any part of the question cannot be answered using the provided context, answer the parts that are present, and politely state which details were missing from the documents.
 """
         ),
