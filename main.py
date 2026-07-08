@@ -91,6 +91,11 @@ prompt = ChatPromptTemplate.from_messages(
 
 Use the provided context to answer the question as completely as possible. 
 
+When a direct definition, quotation, or list item exists in the retrieved context,
+return it exactly as written.
+
+Do not claim the information is missing if the quoted text is present.
+
 If any part of the question cannot be answered using the provided context, answer the parts that are present, and politely state which details were missing from the documents.
 """
         ),
