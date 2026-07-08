@@ -733,7 +733,6 @@
             position: relative;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
             transition: all 0.3s;
-            white-space: pre-wrap;
         }
 
         .message-row.user .message-bubble {
@@ -1587,6 +1586,9 @@
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;");
+
+            // Replace multiple spaces (2 or more) with non-breaking spaces to preserve indentation
+            formatted = formatted.replace(/ {2,}/g, match => '&nbsp;'.repeat(match.length));
 
             // Format Bold code blocks: ```code```
             formatted = formatted.replace(/```([\s\S]+?)```/g, (match, code) => {

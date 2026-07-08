@@ -88,29 +88,20 @@ prompt = ChatPromptTemplate.from_messages(
             "system",
             """You are a helpful AI assistant.
 
-Use the provided context to answer the question as completely as possible.
+Use the provided context to answer the question as completely as possible. 
 
-Format your output exactly as follows:
-
+You MUST format your output exactly as follows:
 Answer:
-[Your detailed answer here, using the context]
+<your detailed answer here>
 
 Sources Used:
+[1] <source_filename>, Page <page_number>
+     <brief 1-sentence description/phrase of the key information retrieved from this source that supports the answer>
 
-[1] [filename], Page [page_number]
-     [A brief 3-7 word summary of what this specific page contains or how it was used to answer the question]
+[2] <source_filename>, Page <page_number>
+     <brief 1-sentence description/phrase of the key information retrieved from this source that supports the answer>
 
-[2] [filename], Page [page_number]
-     [A brief 3-7 word summary of what this specific page contains or how it was used to answer the question]
-
-Rules:
-1. ONLY cite sources and pages that are present in the context.
-2. The filenames and page numbers MUST exactly match those provided in the context.
-3. If no page number is provided in the context for a source, write "[index] [filename]" without ", Page [page_number]".
-4. Indent the summary line under each source with exactly 5 spaces.
-5. If the answer cannot be found in the context, respond with:
-Answer:
-I could not find the answer in the provided documents.
+Note: Ensure the source filename is the exact filename (including extension, e.g., 001_Harvard_Classics.pdf) from the context. If no page number is present in the source metadata, omit the page number (e.g. [1] document.txt). Only list sources that were actually useful and used to answer the query.
 """
         ),
         (
@@ -464,9 +455,7 @@ def query_rag(request: QueryRequest):
     
     for doc in retrieved_docs:
         raw_source = doc.metadata.get("source", "Unknown Source")
-        # Normalize backslashes for cross-platform compatibility
-        normalized_source = raw_source.replace('\\', '/')
-        filename = os.path.basename(normalized_source)
+        filename = os.path.basename(raw_source)
         source_name = filename if filename else "Unknown Source"
         
         page_val = doc.metadata.get("page")
@@ -503,30 +492,26 @@ def query_rag(request: QueryRequest):
         })
         response = llm.invoke(final_prompt)
         
+        # Check LLM output and ensure correct formatting
         response_content = response.content.strip()
         
-        # Enforce formatting fallback if the LLM output doesn't contain "Sources Used:"
-        if "Sources Used:" not in response_content:
-            if not response_content.startswith("Answer:"):
-                # Clean up any potential duplicate label
-                clean_ans = response_content.replace("Answer:\n", "").replace("Answer:", "").strip()
-                response_content = f"Answer:\n{clean_ans}"
-            
-            if citations:
-                citation_lines = ["\n\nSources Used:"]
-                for idx, cit in enumerate(citations, 1):
-                    source_name = cit["source"]
-                    page_num = cit["page"]
-                    if page_num is not None:
-                        cit_str = f"\n[{idx}] {source_name}, Page {page_num}\n     Relevant passage from document"
-                    else:
-                        cit_str = f"\n[{idx}] {source_name}\n     Relevant passage from document"
-                    citation_lines.append(cit_str)
-                response_content += "\n".join(citation_lines)
-        else:
-            # Ensure "Answer:" is at the start if it wrote "Sources Used:" but missed "Answer:"
-            if not response_content.startswith("Answer:"):
+        # Ensure it has the "Answer:" prefix
+        if not response_content.startswith("Answer:"):
+            if "Answer:" not in response_content:
                 response_content = f"Answer:\n{response_content}"
+                
+        # If the LLM forgot to output "Sources Used:", append a structured fallback list
+        if "Sources Used:" not in response_content and citations:
+            fallback_lines = ["\n\nSources Used:"]
+            for idx, cit in enumerate(citations, 1):
+                source_name = cit["source"]
+                page_num = cit["page"]
+                if page_num is not None:
+                    fallback_lines.append(f"[{idx}] {source_name}, Page {page_num}")
+                else:
+                    fallback_lines.append(f"[{idx}] {source_name}")
+                fallback_lines.append("     Snippet retrieved from this source.")
+            response_content += "\n".join(fallback_lines)
             
         return {"response": response_content}
     except Exception as e:
