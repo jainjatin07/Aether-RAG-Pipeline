@@ -164,6 +164,44 @@ def save_metadata(metadata: dict):
     with open(METADATA_FILE, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=4)
 
+# Helper: Clean up chunks in Chroma whose source file is not in metadata.json
+def cleanup_orphaned_chunks():
+    try:
+        metadata = get_metadata()
+        valid_files = set(metadata.keys())
+        db = get_chroma_vectorstore("user_uploads")
+        
+        # Check count first to avoid calling get on an empty db
+        try:
+            count = db._collection.count()
+        except Exception:
+            count = 0
+            
+        if count > 0:
+            results = db.get(include=["metadatas"])
+            if results and "metadatas" in results:
+                unique_sources_in_db = set()
+                for meta in results["metadatas"]:
+                    if meta and "source" in meta:
+                        unique_sources_in_db.add(meta["source"])
+                
+                # Find orphans
+                orphans = []
+                for src in unique_sources_in_db:
+                    fname = os.path.basename(src)
+                    if fname not in valid_files:
+                        orphans.append(src)
+                
+                if orphans:
+                    print(f"Cleaning up orphaned sources from Chroma: {orphans}")
+                    for orphan in orphans:
+                        db.delete(where={"source": orphan})
+                        print(f"Deleted orphaned source: {orphan}")
+        del db
+        gc.collect()
+    except Exception as e:
+        print(f"Orphan cleanup failed: {e}")
+
 # Helper: Load active list of successfully indexed files
 def get_uploaded_filenames() -> List[str]:
     metadata = get_metadata()
@@ -531,6 +569,10 @@ def query_rag(request: QueryRequest):
         return {"response": response_content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Mistral AI query execution failed: {str(e)}")
+
+@app.on_event("startup")
+def startup_event():
+    cleanup_orphaned_chunks()
 
 if __name__ == "__main__":
     import uvicorn
