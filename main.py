@@ -117,7 +117,10 @@ def load_uploaded_file(file_path: str, filename: str) -> List[Document]:
     
     if ext == ".pdf":
         loader = PyPDFLoader(file_path)
-        return loader.load()
+        docs = loader.load()
+        for doc in docs:
+            doc.metadata["source"] = filename
+        return docs
     elif ext == ".docx":
         try:
             import docx
@@ -434,8 +437,37 @@ def query_rag(request: QueryRequest):
             return {"response": "I could not find any uploaded documents in your workspace. Please upload some files (PDF, DOCX, TXT) in the left sidebar first!"}
         return {"response": "No relevant documents could be found for your query. Please refine your question or add more documents."}
         
-    # Compile context
-    context = "\n\n".join([doc.page_content for doc in retrieved_docs])
+    # Compile context and extract page citations
+    context_parts = []
+    citations = []
+    seen_citations = set()
+    
+    for doc in retrieved_docs:
+        raw_source = doc.metadata.get("source", "Unknown Source")
+        filename = os.path.basename(raw_source)
+        source_name = doc.metadata.get("title") or os.path.splitext(filename)[0]
+        
+        page_val = doc.metadata.get("page")
+        if page_val is not None:
+            try:
+                page_num = int(float(page_val)) + 1
+            except (ValueError, TypeError):
+                page_num = page_val
+        else:
+            page_num = None
+            
+        citation_key = (source_name, page_num)
+        if citation_key not in seen_citations:
+            seen_citations.add(citation_key)
+            citations.append({
+                "source": source_name,
+                "page": page_num
+            })
+            
+        page_str = f"\nPage {page_num}" if page_num is not None else ""
+        context_parts.append(f"Source:\n{source_name}{page_str}\nContent:\n{doc.page_content}")
+        
+    context = "\n\n".join(context_parts)
     
     # Clean up DB client instances immediately after retrieval is done (before LLM call)
     del default_db, user_db, default_retriever, user_retriever
@@ -448,7 +480,21 @@ def query_rag(request: QueryRequest):
             "question": query
         })
         response = llm.invoke(final_prompt)
-        return {"response": response.content}
+        
+        # Append citations to response
+        response_content = response.content.strip()
+        if citations:
+            citation_blocks = []
+            for cit in citations:
+                source_name = cit["source"]
+                page_num = cit["page"]
+                cit_str = f"Source:\n{source_name}"
+                if page_num is not None:
+                    cit_str += f"\nPage {page_num}"
+                citation_blocks.append(cit_str)
+            response_content += "\n\n" + "\n\n".join(citation_blocks)
+            
+        return {"response": response_content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Mistral AI query execution failed: {str(e)}")
 
