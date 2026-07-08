@@ -13,6 +13,7 @@ chromadb
 
 # Document Loaders (for PDF and DOCX uploads)
 pypdf
+pymupdf
 python-docx
 
 # Environment Variables

@@ -3,6 +3,7 @@ import re
 import json
 import shutil
 import gc
+import time
 from typing import List
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -17,7 +18,7 @@ from langchain_mistralai import ChatMistralAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyMuPDFLoader
 
 # Load environment variables
 load_dotenv()
@@ -77,8 +78,8 @@ def get_chroma_vectorstore(collection_name: str) -> Chroma:
 
 # Text Splitter for uploads
 splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=250,
+    chunk_size=2000,
+    chunk_overlap=400,
 )
 
 # Prompt template
@@ -116,7 +117,7 @@ def load_uploaded_file(file_path: str, filename: str) -> List[Document]:
     ext = os.path.splitext(filename)[1].lower()
     
     if ext == ".pdf":
-        loader = PyPDFLoader(file_path)
+        loader = PyMuPDFLoader(file_path)
         docs = loader.load()
         for doc in docs:
             doc.metadata["source"] = filename
@@ -186,7 +187,13 @@ def rebuild_user_collection(remaining_files: List[str]):
                 docs = load_uploaded_file(fpath, fname)
                 if docs:
                     chunks = splitter.split_documents(docs)
-                    db.add_documents(chunks)
+                    batch_size = 200
+                    total_chunks = len(chunks)
+                    for i in range(0, total_chunks, batch_size):
+                        batch = chunks[i : i + batch_size]
+                        db.add_documents(batch)
+                        if i + batch_size < total_chunks:
+                            time.sleep(0.5)
                     del chunks
                     del docs
                     gc.collect()
@@ -207,17 +214,28 @@ def get_dashboard():
 # Helper: Background task to parse and index document
 def index_document_task(file_path: str, filename: str):
     try:
+        start_time = time.time()
+        print(f"Starting indexing for {filename}...")
         docs = load_uploaded_file(file_path, filename)
         if not docs:
             raise ValueError("Uploaded file is empty.")
         
         # Split documents
         chunks = splitter.split_documents(docs)
+        print(f"Split {filename} into {len(chunks)} chunks.")
         
-        # Add to Chroma
+        # Add to Chroma in batches to prevent payload size and timeout issues
         db = get_chroma_vectorstore("user_uploads")
-        db.add_documents(chunks)
+        batch_size = 200
+        total_chunks = len(chunks)
         
+        for i in range(0, total_chunks, batch_size):
+            batch = chunks[i : i + batch_size]
+            db.add_documents(batch)
+            print(f"Indexed batch {i//batch_size + 1}/{(total_chunks + batch_size - 1)//batch_size} ({len(batch)} chunks) for {filename}")
+            if i + batch_size < total_chunks:
+                time.sleep(0.5)  # Slight rate-limit buffer
+                
         # Clean up database client instance and garbage collect immediately
         del db
         del chunks
@@ -228,7 +246,8 @@ def index_document_task(file_path: str, filename: str):
         metadata = get_metadata()
         metadata[filename] = "ready"
         save_metadata(metadata)
-        print(f"Successfully indexed {filename} in background.")
+        duration = time.time() - start_time
+        print(f"Successfully indexed {filename} in background in {duration:.2f} seconds.")
     except Exception as e:
         print(f"Error indexing {filename} in background: {e}")
         # Remove from metadata on failure
