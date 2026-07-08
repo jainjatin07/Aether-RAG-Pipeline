@@ -445,7 +445,7 @@ def query_rag(request: QueryRequest):
     for doc in retrieved_docs:
         raw_source = doc.metadata.get("source", "Unknown Source")
         filename = os.path.basename(raw_source)
-        source_name = doc.metadata.get("title") or os.path.splitext(filename)[0]
+        source_name = filename if filename else "Unknown Source"
         
         page_val = doc.metadata.get("page")
         if page_val is not None:
@@ -482,17 +482,18 @@ def query_rag(request: QueryRequest):
         response = llm.invoke(final_prompt)
         
         # Append citations to response
-        response_content = response.content.strip()
+        response_content = f"Answer:\n{response.content.strip()}"
         if citations:
-            citation_blocks = []
+            citation_lines = ["\n\nSources Used:"]
             for cit in citations:
                 source_name = cit["source"]
                 page_num = cit["page"]
-                cit_str = f"Source:\n{source_name}"
                 if page_num is not None:
-                    cit_str += f"\nPage {page_num}"
-                citation_blocks.append(cit_str)
-            response_content += "\n\n" + "\n\n".join(citation_blocks)
+                    cit_str = f"- {source_name} (Page {page_num})"
+                else:
+                    cit_str = f"- {source_name}"
+                citation_lines.append(cit_str)
+            response_content += "\n".join(citation_lines)
             
         return {"response": response_content}
     except Exception as e:
